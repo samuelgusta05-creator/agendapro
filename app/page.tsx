@@ -1,271 +1,230 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  Activity, BarChart3, Bell, CalendarDays, CheckCircle2, ChevronDown,
-  ChevronLeft, ChevronRight, CircleDollarSign, Clock3, Download, Eye,
-  EyeOff, FileText, LayoutDashboard, LockKeyhole, LogIn, LogOut, Menu,
-  MoreHorizontal, Plus, Search, Settings, ShieldCheck, Sparkles,
-  TrendingDown, TrendingUp, UserRound, UsersRound, Wrench, X,
+  BarChart3, Building2, CalendarDays, CheckCircle2, ChevronRight,
+  CircleDollarSign, Clock3, Eye, EyeOff, LayoutDashboard, LoaderCircle,
+  LockKeyhole, LogOut, Menu, Plus, Search, ShieldCheck, Sparkles,
+  UserPlus, UserRound, UsersRound, X,
 } from "lucide-react";
-import {
-  Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
-  Tooltip, XAxis, YAxis,
-} from "recharts";
 
-type Status = "Confirmado" | "Pendente" | "Em atendimento" | "Concluído" | "Cancelado";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+const SESSION_KEY = "agendapro-auth";
+
+type Session = { access_token: string; refresh_token: string; expires_at?: number; user: { id: string; email?: string } };
+type Profile = { id: string; organization_id: string; full_name: string; email: string; role: string; is_platform_admin: boolean };
+type Organization = { id: string; name: string; slug: string; owner_id: string; created_at: string };
+type Client = { id: string; organization_id: string; name: string; email?: string; phone?: string; created_at: string };
 type Appointment = {
-  id: number; time: string; end: string; client: string; phone: string;
-  service: string; professional: string; value: number; status: Status;
+  id: string; organization_id: string; client_id?: string; client_name: string;
+  service: string; professional: string; starts_at: string; duration_minutes: number;
+  value: number; status: string; created_at: string;
 };
 
-const initialAppointments: Appointment[] = [
-  { id: 1, time: "09:00", end: "10:00", client: "Mariana Costa", phone: "(11) 98765-4321", service: "Coloração premium", professional: "Camila Alves", value: 280, status: "Confirmado" },
-  { id: 2, time: "10:30", end: "11:15", client: "Lucas Mendes", phone: "(11) 99821-1170", service: "Corte masculino", professional: "Rafael Lima", value: 75, status: "Em atendimento" },
-  { id: 3, time: "11:30", end: "12:30", client: "Sofia Rodrigues", phone: "(11) 99213-5520", service: "Manicure + pedicure", professional: "Julia Santos", value: 110, status: "Pendente" },
-  { id: 4, time: "14:00", end: "15:30", client: "Beatriz Souza", phone: "(11) 98154-9902", service: "Mechas", professional: "Camila Alves", value: 390, status: "Confirmado" },
-  { id: 5, time: "16:00", end: "16:45", client: "Ana Paula", phone: "(11) 99711-2408", service: "Escova", professional: "Camila Alves", value: 90, status: "Pendente" },
-];
-
-const trend = [
-  { day: "01", total: 12 }, { day: "05", total: 18 }, { day: "09", total: 14 },
-  { day: "13", total: 24 }, { day: "17", total: 20 }, { day: "21", total: 29 },
-  { day: "25", total: 25 }, { day: "30", total: 34 },
-];
-const statusData = [
-  { name: "Concluídos", value: 56, color: "#22b981" },
-  { name: "Confirmados", value: 28, color: "#7757d9" },
-  { name: "Pendentes", value: 12, color: "#efb83f" },
-  { name: "Cancelados", value: 4, color: "#ef6464" },
-];
-
-const nav = [
-  ["Dashboard", LayoutDashboard], ["Agenda", CalendarDays], ["Agendamentos", Clock3],
-  ["Novo agendamento", Plus], ["Clientes", UsersRound], ["Serviços", Wrench],
-  ["Profissionais", UserRound], ["Relatórios", BarChart3], ["Configurações", Settings],
-] as const;
-
-const accessAccounts = [
-  { email: "admin@agendapro.com", password: "AgendaPro2026", name: "Marina Costa", role: "Administradora" },
-  { email: "atendimento@agendapro.com", password: "Atendimento2026", name: "Paula Nunes", role: "Atendente" },
-  { email: "profissional@agendapro.com", password: "Profissional2026", name: "Camila Alves", role: "Profissional" },
-] as const;
-
-function StatusPill({ status }: { status: Status }) {
-  return <span className={`status status-${status.toLowerCase().replace(" ", "-")}`}><i />{status}</span>;
+async function supabaseFetch<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
+  const response = await fetch(`${SUPABASE_URL}${path}`, {
+    ...init,
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token || SUPABASE_KEY}`, "Content-Type": "application/json", ...init.headers },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.msg || body.message || body.error_description || body.error || "Não foi possível concluir a operação.");
+  }
+  if (response.status === 204) return undefined as T;
+  return response.json();
 }
 
-function Metric({ icon: Icon, label, value, delta, color, down = false }: {
-  icon: typeof Activity; label: string; value: string; delta: string; color: string; down?: boolean
-}) {
-  return <article className="metric">
-    <div className="metric-top"><span className="metric-icon" style={{ background: `${color}18`, color }}><Icon size={20} /></span><MoreHorizontal size={18} /></div>
-    <p>{label}</p><div className="metric-value">{value}</div>
-    <span className={down ? "delta down" : "delta"}>{down ? <TrendingDown size={14} /> : <TrendingUp size={14} />}{delta} <small>vs. período anterior</small></span>
-  </article>;
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 export default function Home() {
-  const [authenticated, setAuthenticated] = useState(false);
-  const [authReady, setAuthReady] = useState(false);
-  const [currentUser, setCurrentUser] = useState({ name: "Marina Costa", role: "Administradora", email: "admin@agendapro.com" });
-  const [login, setLogin] = useState({ email: "", password: "", remember: true });
-  const [loginError, setLoginError] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [loggingIn, setLoggingIn] = useState(false);
-  const [active, setActive] = useState("Dashboard");
+  const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [organization, setOrganization] = useState<Organization | null>(null);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [allClients, setAllClients] = useState<Client[]>([]);
+  const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [active, setActive] = useState("Visão geral");
   const [sidebar, setSidebar] = useState(false);
-  const [appointments, setAppointments] = useState(initialAppointments);
+  const [clientModal, setClientModal] = useState(false);
+  const [appointmentModal, setAppointmentModal] = useState(false);
   const [toast, setToast] = useState("");
-  const [query, setQuery] = useState("");
-  const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ client: "", phone: "", service: "Corte feminino", professional: "Camila Alves", date: "2026-07-30", time: "17:00", duration: "60", value: "120", status: "Pendente" as Status });
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("agendapro-session");
-    if (saved) {
-      try {
-        const session = JSON.parse(saved);
-        setCurrentUser(session);
-        setAuthenticated(true);
-      } catch {
-        window.localStorage.removeItem("agendapro-session");
-      }
-    }
-    setAuthReady(true);
+    const stored = localStorage.getItem(SESSION_KEY);
+    if (!stored) return setLoading(false);
+    try {
+      const parsed = JSON.parse(stored) as Session;
+      if (parsed.expires_at && parsed.expires_at * 1000 < Date.now() + 60_000) {
+        supabaseFetch<Session>("/auth/v1/token?grant_type=refresh_token", { method: "POST", body: JSON.stringify({ refresh_token: parsed.refresh_token }) }).then(saveSession).catch(logout);
+      } else { setSession(parsed); loadWorkspace(parsed); }
+    } catch { localStorage.removeItem(SESSION_KEY); setLoading(false); }
   }, []);
 
-  const filtered = useMemo(() => appointments.filter(a => `${a.client} ${a.service} ${a.professional}`.toLowerCase().includes(query.toLowerCase())), [appointments, query]);
+  function notify(message: string) { setToast(message); window.setTimeout(() => setToast(""), 3000); }
+  function saveSession(next: Session) { localStorage.setItem(SESSION_KEY, JSON.stringify(next)); setSession(next); loadWorkspace(next); }
 
-  function notify(message: string) {
-    setToast(message); window.setTimeout(() => setToast(""), 2600);
-  }
-  function updateStatus(id: number, status: Status) {
-    setAppointments(a => a.map(item => item.id === id ? { ...item, status } : item));
-    notify(`Agendamento marcado como ${status.toLowerCase()}.`);
-  }
-  function createAppointment(e: React.FormEvent) {
-    e.preventDefault();
-    const [h, m] = form.time.split(":").map(Number);
-    const endMinutes = h * 60 + m + Number(form.duration);
-    const end = `${String(Math.floor(endMinutes / 60)).padStart(2, "0")}:${String(endMinutes % 60).padStart(2, "0")}`;
-    const conflict = appointments.some(a => a.professional === form.professional && form.time < a.end && end > a.time);
-    if (conflict) { notify("Conflito: este profissional já possui um atendimento nesse horário."); return; }
-    setAppointments(a => [...a, { id: Date.now(), time: form.time, end, client: form.client, phone: form.phone, service: form.service, professional: form.professional, value: Number(form.value), status: form.status }].sort((a,b) => a.time.localeCompare(b.time)));
-    setModal(false); notify("Agendamento salvo com sucesso.");
-  }
-
-  function go(page: string) { setActive(page); setSidebar(false); if (page === "Novo agendamento") setModal(true); }
-
-  function submitLogin(e: React.FormEvent) {
-    e.preventDefault();
-    setLoginError("");
-    setLoggingIn(true);
-    const account = accessAccounts.find(
-      item => item.email.toLowerCase() === login.email.trim().toLowerCase() && item.password === login.password,
-    );
-    window.setTimeout(() => {
-      if (!account) {
-        setLoginError("E-mail ou senha inválidos. Confira os dados e tente novamente.");
-        setLoggingIn(false);
-        return;
+  async function loadWorkspace(auth: Session) {
+    setLoading(true);
+    try {
+      const profileRows = await supabaseFetch<Profile[]>(`/rest/v1/profiles?id=eq.${auth.user.id}&select=*`, {}, auth.access_token);
+      const currentProfile = profileRows[0];
+      if (!currentProfile) throw new Error("Seu perfil ainda está sendo preparado. Entre novamente em alguns segundos.");
+      setProfile(currentProfile);
+      const [orgRows, clientRows, appointmentRows] = await Promise.all([
+        supabaseFetch<Organization[]>(`/rest/v1/organizations?id=eq.${currentProfile.organization_id}&select=*`, {}, auth.access_token),
+        supabaseFetch<Client[]>("/rest/v1/clients?select=*&order=created_at.desc", {}, auth.access_token),
+        supabaseFetch<Appointment[]>("/rest/v1/appointments?select=*&order=starts_at.asc", {}, auth.access_token),
+      ]);
+      setOrganization(orgRows[0] || null); setClients(clientRows); setAppointments(appointmentRows);
+      if (currentProfile.is_platform_admin) {
+        const [orgList, clientList, profileList] = await Promise.all([
+          supabaseFetch<Organization[]>("/rest/v1/organizations?select=*&order=created_at.desc", {}, auth.access_token),
+          supabaseFetch<Client[]>("/rest/v1/clients?select=*", {}, auth.access_token),
+          supabaseFetch<Profile[]>("/rest/v1/profiles?select=*", {}, auth.access_token),
+        ]);
+        setOrganizations(orgList); setAllClients(clientList); setAllProfiles(profileList);
       }
-      const session = { name: account.name, role: account.role, email: account.email };
-      setCurrentUser(session);
-      setAuthenticated(true);
-      if (login.remember) window.localStorage.setItem("agendapro-session", JSON.stringify(session));
-      setLoggingIn(false);
-    }, 550);
+    } catch (error) { notify(error instanceof Error ? error.message : "Falha ao carregar sua conta."); }
+    finally { setLoading(false); }
   }
 
-  function logout() {
-    window.localStorage.removeItem("agendapro-session");
-    setAuthenticated(false);
-    setLogin({ email: "", password: "", remember: true });
-    setActive("Dashboard");
-  }
+  function logout() { localStorage.removeItem(SESSION_KEY); setSession(null); setProfile(null); setOrganization(null); setLoading(false); }
 
-  if (!authReady) {
-    return <div className="auth-loading"><span><CalendarDays size={28} /></span><p>Carregando AgendaPro...</p></div>;
-  }
+  if (!SUPABASE_URL || !SUPABASE_KEY) return <Fatal message="A conexão com o banco ainda não foi configurada." />;
+  if (loading) return <Loading />;
+  if (!session) return <AuthScreen onSession={saveSession} />;
 
-  if (!authenticated) {
-    return <main className="login-page">
-      <section className="login-brand-panel">
-        <div className="login-brand"><span><CalendarDays size={27} /></span><strong>Agenda<b>Pro</b></strong></div>
-        <div className="login-message">
-          <span className="eyebrow"><ShieldCheck size={15} /> GESTÃO INTELIGENTE</span>
-          <h1>Sua agenda.<br />Seu negócio.<br /><em>Tudo sob controle.</em></h1>
-          <p>Organize atendimentos, acompanhe resultados e ofereça uma experiência impecável aos seus clientes.</p>
-        </div>
-        <div className="login-proof"><div className="proof-avatars"><i>MC</i><i>CA</i><i>RL</i></div><div><b>+2.500 profissionais</b><small>organizam suas agendas todos os dias</small></div></div>
-      </section>
-      <section className="login-form-panel">
-        <form className="login-card" onSubmit={submitLogin}>
-          <div className="mobile-login-brand"><span><CalendarDays size={22} /></span>Agenda<b>Pro</b></div>
-          <div className="login-icon"><LockKeyhole size={22} /></div>
-          <h2>Bem-vindo de volta</h2>
-          <p>Acesse sua conta para continuar.</p>
-          <label>E-mail profissional
-            <div className="login-field"><UserRound size={18} /><input type="email" required autoComplete="email" value={login.email} onChange={e => setLogin({...login, email:e.target.value})} placeholder="seu@email.com" /></div>
-          </label>
-          <label>Senha
-            <div className="login-field"><LockKeyhole size={18} /><input type={showPassword ? "text" : "password"} required autoComplete="current-password" value={login.password} onChange={e => setLogin({...login, password:e.target.value})} placeholder="Digite sua senha" /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
-          </label>
-          <div className="login-options"><label><input type="checkbox" checked={login.remember} onChange={e => setLogin({...login, remember:e.target.checked})} /> Lembrar de mim</label><button type="button" onClick={() => setLoginError("Entre em contato com o administrador da empresa para redefinir sua senha.")}>Esqueci minha senha</button></div>
-          {loginError && <div className="login-error" role="alert">{loginError}</div>}
-          <button className="login-submit" disabled={loggingIn}>{loggingIn ? <><span className="spinner" /> Entrando...</> : <><LogIn size={18} /> Entrar no AgendaPro</>}</button>
-          <div className="demo-access"><span>Acesso de demonstração</span><button type="button" onClick={() => setLogin({...login, email:"admin@agendapro.com", password:"AgendaPro2026"})}><b>Administrador</b><small>admin@agendapro.com · AgendaPro2026</small></button></div>
-          <small className="login-security"><ShieldCheck size={14} /> Ambiente protegido e acesso monitorado</small>
-        </form>
-      </section>
-    </main>;
-  }
+  const confirmed = appointments.filter(item => item.status === "Confirmado").length;
+  const pending = appointments.filter(item => item.status === "Pendente").length;
+  const revenue = appointments.filter(item => item.status !== "Cancelado").reduce((sum, item) => sum + Number(item.value), 0);
+  const nav = [
+    { label: "Visão geral", icon: LayoutDashboard },
+    { label: "Agendamentos", icon: CalendarDays },
+    { label: "Clientes", icon: UsersRound },
+    ...(profile?.is_platform_admin ? [{ label: "Painel mestre", icon: ShieldCheck }] : []),
+  ];
 
-  return <div className="app-shell">
-    <aside className={`sidebar ${sidebar ? "open" : ""}`}>
-      <button className="close-mobile" onClick={() => setSidebar(false)} aria-label="Fechar menu"><X /></button>
-      <div className="brand"><span><CalendarDays size={23} /></span><div>Agenda<b>Pro</b></div></div>
-      <div className="company"><span className="avatar">BS</span><div><b>Beauty Studio</b><small>Unidade Jardins</small></div><ChevronDown size={15} /></div>
-      <nav><small>MENU PRINCIPAL</small>{nav.map(([label, Icon]) => <button key={label} className={active === label ? "active" : ""} onClick={() => go(label)}><Icon size={19} />{label}{label === "Agendamentos" && <em>12</em>}</button>)}</nav>
-      <div className="help"><Sparkles size={20} /><b>Precisa de ajuda?</b><small>Nossa equipe está online.</small><button onClick={() => notify("Conversa com o suporte iniciada.")}>Falar com suporte</button></div>
-      <div className="profile"><span className="avatar photo">{currentUser.name.split(" ").map(n => n[0]).join("").slice(0,2)}</span><div><b>{currentUser.name}</b><small>{currentUser.role}</small></div><button className="logout-button" onClick={logout} title="Sair do sistema" aria-label="Sair do sistema"><LogOut size={18} /></button></div>
+  return <div className="app">
+    <aside className={sidebar ? "sidebar open" : "sidebar"}>
+      <button className="mobile-close" onClick={() => setSidebar(false)} aria-label="Fechar menu"><X /></button>
+      <Logo />
+      <div className="workspace"><span>{organization?.name?.slice(0, 1).toUpperCase() || "A"}</span><div><strong>{organization?.name || "Minha empresa"}</strong><small>Conta profissional</small></div></div>
+      <nav><small>MENU PRINCIPAL</small>{nav.map(({ label, icon: Icon }) => <button key={label} className={active === label ? "active" : ""} onClick={() => { setActive(label); setSidebar(false); }}><Icon size={19} />{label}</button>)}</nav>
+      <div className="support"><Sparkles size={20} /><strong>AgendaPro para negócios</strong><small>Seus dados ficam separados e protegidos.</small></div>
+      <div className="user"><span>{profile?.full_name?.slice(0, 2).toUpperCase() || "US"}</span><div><strong>{profile?.full_name}</strong><small>{profile?.is_platform_admin ? "Administrador da plataforma" : "Proprietário"}</small></div><button onClick={logout} title="Sair"><LogOut size={18} /></button></div>
     </aside>
 
     <main className="main">
-      <header className="topbar">
-        <button className="mobile-menu" onClick={() => setSidebar(true)} aria-label="Abrir menu"><Menu /></button>
-        <div className="global-search"><Search size={18} /><input aria-label="Buscar" placeholder="Buscar clientes, agendamentos..." /></div>
-        <div className="top-actions"><button className="today"><CalendarDays size={17} /> Hoje, 30 de julho</button><button className="notification" onClick={() => notify("Você tem 3 notificações novas.")}><Bell size={20} /><i /></button><button className="primary" onClick={() => setModal(true)}><Plus size={18} /> Novo agendamento</button></div>
-      </header>
-
+      <header><button className="mobile-menu" onClick={() => setSidebar(true)}><Menu /></button><div className="search"><Search size={18} /><input placeholder="Buscar no AgendaPro" /></div><button className="primary" onClick={() => setAppointmentModal(true)}><Plus size={18} /> Novo agendamento</button></header>
       <div className="content">
-        {active === "Dashboard" ? <>
-          <section className="welcome"><div><p>QUINTA-FEIRA, 30 DE JULHO</p><h1>Bom dia, Marina! <span>👋</span></h1><h2>Veja o que está acontecendo no seu negócio hoje.</h2></div><button className="outline" onClick={() => go("Relatórios")}><FileText size={17} /> Ver relatório do dia</button></section>
-          <section className="metrics">
-            <Metric icon={CalendarDays} label="Agendamentos de hoje" value={String(appointments.length + 7)} delta="+12,5%" color="#3478f6" />
-            <Metric icon={CheckCircle2} label="Concluídos hoje" value="5" delta="+8,2%" color="#22b981" />
-            <Metric icon={Clock3} label="Pendentes" value={String(appointments.filter(a => a.status === "Pendente").length)} delta="-4,3%" color="#efb83f" down />
-            <Metric icon={Activity} label="Taxa de comparecimento" value="92%" delta="+3,1%" color="#7757d9" />
-          </section>
-
-          <section className="chart-grid">
-            <article className="panel chart-panel"><div className="panel-head"><div><h3>Visão geral dos agendamentos</h3><p>Últimos 30 dias</p></div><button className="select">Últimos 30 dias <ChevronDown size={15} /></button></div>
-              <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={trend} margin={{ top: 15, right: 10, left: -25, bottom: 0 }}><defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3478f6" stopOpacity={.25}/><stop offset="100%" stopColor="#3478f6" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#edf1f7"/><XAxis dataKey="day" axisLine={false} tickLine={false}/><YAxis axisLine={false} tickLine={false}/><Tooltip/><Area type="monotone" dataKey="total" stroke="#3478f6" strokeWidth={3} fill="url(#fill)"/></AreaChart></ResponsiveContainer></div>
-            </article>
-            <article className="panel status-panel"><div className="panel-head"><div><h3>Status dos agendamentos</h3><p>Distribuição no mês</p></div><button className="icon-button"><MoreHorizontal /></button></div>
-              <div className="donut"><ResponsiveContainer width="58%" height={190}><PieChart><Pie data={statusData} dataKey="value" innerRadius={58} outerRadius={78} paddingAngle={3}>{statusData.map(s => <Cell key={s.name} fill={s.color}/>)}</Pie><Tooltip/></PieChart></ResponsiveContainer><div className="donut-label"><strong>248</strong><small>Total</small></div><div className="legend">{statusData.map(s => <div key={s.name}><i style={{background:s.color}}/><span>{s.name}</span><b>{s.value}%</b></div>)}</div></div>
-            </article>
-          </section>
-
-          <AppointmentsPanel rows={appointments} updateStatus={updateStatus} notify={notify} onAll={() => go("Agendamentos")} />
-        </> : active === "Agenda" ? <AgendaView appointments={appointments} onNew={() => setModal(true)} /> : active === "Relatórios" ? <Reports /> :
-          <ListView title={active} rows={filtered} query={query} setQuery={setQuery} updateStatus={updateStatus} onNew={() => setModal(true)} />}
+        {active === "Visão geral" && <>
+          <div className="heading"><div><small>PAINEL DA EMPRESA</small><h1>Olá, {profile?.full_name?.split(" ")[0]}!</h1><p>Acompanhe o movimento da sua empresa em tempo real.</p></div><button className="secondary" onClick={() => setClientModal(true)}><UserPlus size={17} /> Novo cliente</button></div>
+          <section className="metrics"><Metric icon={CalendarDays} label="Agendamentos" value={String(appointments.length)} accent="blue" /><Metric icon={CheckCircle2} label="Confirmados" value={String(confirmed)} accent="green" /><Metric icon={Clock3} label="Pendentes" value={String(pending)} accent="amber" /><Metric icon={CircleDollarSign} label="Receita prevista" value={revenue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} accent="purple" /></section>
+          <section className="two-columns"><Panel title="Próximos agendamentos" action="Ver todos" onAction={() => setActive("Agendamentos")}><AppointmentList items={appointments.slice(0, 5)} /></Panel><Panel title="Clientes recentes" action="Ver clientes" onAction={() => setActive("Clientes")}><ClientList items={clients.slice(0, 5)} /></Panel></section>
+        </>}
+        {active === "Clientes" && <ClientsPage clients={clients} onNew={() => setClientModal(true)} />}
+        {active === "Agendamentos" && <AppointmentsPage appointments={appointments} onNew={() => setAppointmentModal(true)} />}
+        {active === "Painel mestre" && profile?.is_platform_admin && <MasterDashboard organizations={organizations} clients={allClients} profiles={allProfiles} />}
       </div>
     </main>
-
-    {modal && <div className="modal-backdrop" onMouseDown={() => setModal(false)}><form className="modal" onSubmit={createAppointment} onMouseDown={e => e.stopPropagation()}>
-      <div className="modal-head"><div><span className="modal-icon"><CalendarDays /></span><div><h2>Novo agendamento</h2><p>Preencha os dados do novo atendimento.</p></div></div><button type="button" onClick={() => setModal(false)}><X /></button></div>
-      <div className="form-grid"><label className="wide">Nome do cliente<input required value={form.client} onChange={e => setForm({...form, client:e.target.value})} placeholder="Digite ou selecione um cliente" /></label>
-        <label>Telefone / WhatsApp<input required value={form.phone} onChange={e => setForm({...form, phone:e.target.value})} placeholder="(00) 00000-0000" /></label>
-        <label>Serviço<select value={form.service} onChange={e => setForm({...form, service:e.target.value})}><option>Corte feminino</option><option>Coloração premium</option><option>Manicure + pedicure</option><option>Escova</option></select></label>
-        <label>Profissional<select value={form.professional} onChange={e => setForm({...form, professional:e.target.value})}><option>Camila Alves</option><option>Rafael Lima</option><option>Julia Santos</option></select></label>
-        <label>Data<input type="date" value={form.date} onChange={e => setForm({...form, date:e.target.value})}/></label>
-        <label>Horário inicial<input type="time" value={form.time} onChange={e => setForm({...form, time:e.target.value})}/></label>
-        <label>Duração<select value={form.duration} onChange={e => setForm({...form, duration:e.target.value})}><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60">1 hora</option><option value="90">1h30</option></select></label>
-        <label>Valor (R$)<input type="number" value={form.value} onChange={e => setForm({...form, value:e.target.value})}/></label>
-        <label>Status<select value={form.status} onChange={e => setForm({...form, status:e.target.value as Status})}><option>Pendente</option><option>Confirmado</option></select></label>
-        <label className="wide">Observações<textarea placeholder="Adicione informações importantes..." /></label>
-      </div>
-      <div className="reminder"><input type="checkbox" defaultChecked id="reminder"/><label htmlFor="reminder"><b>Enviar lembrete pelo WhatsApp</b><small>O cliente será avisado 24 horas antes.</small></label></div>
-      <div className="modal-actions"><button type="button" className="outline" onClick={() => setModal(false)}>Cancelar</button><button className="primary"><CheckCircle2 size={18}/> Salvar agendamento</button></div>
-    </form></div>}
-    {toast && <div className="toast"><CheckCircle2 size={19}/>{toast}</div>}
+    {clientModal && profile && session && <ClientModal organizationId={profile.organization_id} token={session.access_token} onClose={() => setClientModal(false)} onCreated={(client) => { setClients(items => [client, ...items]); setAllClients(items => [client, ...items]); setClientModal(false); notify("Cliente cadastrado com sucesso."); }} />}
+    {appointmentModal && profile && session && <AppointmentModal organizationId={profile.organization_id} token={session.access_token} clients={clients} onClose={() => setAppointmentModal(false)} onCreated={(item) => { setAppointments(items => [...items, item].sort((a, b) => a.starts_at.localeCompare(b.starts_at))); setAppointmentModal(false); notify("Agendamento criado com sucesso."); }} />}
+    {toast && <div className="toast"><CheckCircle2 size={18} />{toast}</div>}
   </div>;
 }
 
-function AppointmentsPanel({ rows, updateStatus, notify, onAll }: { rows: Appointment[]; updateStatus:(id:number,s:Status)=>void; notify:(s:string)=>void; onAll:()=>void }) {
-  return <section className="panel appointments"><div className="panel-head"><div><h3>Agendamentos de hoje</h3><p>{rows.length} atendimentos encontrados para hoje</p></div><button className="link-button" onClick={onAll}>Ver todos <ChevronRight size={16}/></button></div>
-    <div className="table-wrap"><table><thead><tr><th>HORÁRIO</th><th>CLIENTE</th><th>SERVIÇO</th><th>PROFISSIONAL</th><th>VALOR</th><th>STATUS</th><th></th></tr></thead><tbody>{rows.slice(0,5).map(a => <tr key={a.id}><td><b className="time">{a.time}</b><small>{a.end}</small></td><td><div className="client"><span className="avatar small">{a.client.split(" ").map(n=>n[0]).join("").slice(0,2)}</span><div><b>{a.client}</b><small>{a.phone}</small></div></div></td><td>{a.service}</td><td><div className="professional"><span className="dot-avatar"/>{a.professional}</div></td><td><b>R$ {a.value.toFixed(2).replace(".",",")}</b></td><td><StatusPill status={a.status}/></td><td><div className="row-actions"><button title="Visualizar" onClick={() => notify(`Visualizando o agendamento de ${a.client}.`)}><Eye size={17}/></button>{a.status === "Pendente" && <button title="Confirmar" onClick={() => updateStatus(a.id,"Confirmado")}><CheckCircle2 size={17}/></button>}<button title="Mais ações" onClick={() => notify("Menu de ações aberto.")}><MoreHorizontal size={18}/></button></div></td></tr>)}</tbody></table></div>
-  </section>;
+function AuthScreen({ onSession }: { onSession: (session: Session) => void }) {
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [form, setForm] = useState({ name: "", company: "", email: "", password: "" });
+
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setError(""); setSuccess("");
+    try {
+      if (mode === "login") {
+        const result = await supabaseFetch<Session>("/auth/v1/token?grant_type=password", { method: "POST", body: JSON.stringify({ email: form.email, password: form.password }) });
+        onSession(result);
+      } else {
+        const result = await supabaseFetch<Session>("/auth/v1/signup", { method: "POST", body: JSON.stringify({ email: form.email, password: form.password, data: { full_name: form.name, company_name: form.company } }) });
+        if (result.access_token) onSession(result);
+        else setSuccess("Cadastro realizado! Confira seu e-mail para confirmar a conta e depois faça o login.");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Não foi possível continuar.";
+      setError(message === "Invalid login credentials" ? "E-mail ou senha inválidos." : message);
+    } finally { setBusy(false); }
+  }
+  async function recover() {
+    if (!form.email) return setError("Digite seu e-mail primeiro.");
+    setBusy(true); setError("");
+    try { await supabaseFetch("/auth/v1/recover", { method: "POST", body: JSON.stringify({ email: form.email, redirect_to: window.location.origin }) }); setSuccess("Enviamos as instruções de recuperação para seu e-mail."); }
+    catch (err) { setError(err instanceof Error ? err.message : "Não foi possível enviar o e-mail."); }
+    finally { setBusy(false); }
+  }
+
+  return <main className="auth-page">
+    <section className="auth-brand"><Logo /><div><span className="eyebrow"><ShieldCheck size={15} /> GESTÃO INTELIGENTE</span><h1>Sua agenda.<br />Seu negócio.<br /><em>Tudo sob controle.</em></h1><p>Tenha clientes, agendamentos e resultados em um sistema profissional, seguro e feito para crescer com sua empresa.</p></div><div className="auth-proof"><CheckCircle2 size={20} /><span><strong>Uma conta por empresa</strong><small>Dados protegidos e separados automaticamente</small></span></div></section>
+    <section className="auth-form-wrap"><form className="auth-card" onSubmit={submit}><div className="mobile-logo"><Logo /></div>
+      <div className="auth-tabs"><button type="button" className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); setSuccess(""); }}>Entrar</button><button type="button" className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); setSuccess(""); }}>Cadastre-se</button></div>
+      <div className="auth-title"><span><LockKeyhole size={21} /></span><h2>{mode === "login" ? "Bem-vindo de volta" : "Crie sua conta"}</h2><p>{mode === "login" ? "Acesse sua empresa para continuar." : "Comece agora com seu espaço exclusivo."}</p></div>
+      {mode === "signup" && <><Field label="Seu nome"><UserRound size={18} /><input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Nome completo" /></Field><Field label="Nome da empresa"><Building2 size={18} /><input required value={form.company} onChange={e => setForm({ ...form, company: e.target.value })} placeholder="Ex.: Studio Bella" /></Field></>}
+      <Field label="E-mail"><UserRound size={18} /><input type="email" required autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="voce@empresa.com" /></Field>
+      <Field label="Senha"><LockKeyhole size={18} /><input type={showPassword ? "text" : "password"} required minLength={8} autoComplete={mode === "login" ? "current-password" : "new-password"} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Mínimo de 8 caracteres" /><button type="button" onClick={() => setShowPassword(value => !value)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></Field>
+      {mode === "login" && <button className="forgot" type="button" onClick={recover}>Esqueci minha senha</button>}
+      {error && <div className="message error">{error}</div>}{success && <div className="message success">{success}</div>}
+      <button className="auth-submit" disabled={busy}>{busy ? <LoaderCircle className="spin" size={19} /> : mode === "login" ? <LockKeyhole size={18} /> : <UserPlus size={18} />}{busy ? "Aguarde..." : mode === "login" ? "Entrar no AgendaPro" : "Criar minha conta"}</button>
+      <p className="terms"><ShieldCheck size={14} /> Ao continuar, você concorda com os termos de uso e privacidade.</p>
+    </form></section>
+  </main>;
 }
 
-function ListView({ title, rows, query, setQuery, updateStatus, onNew }: { title:string; rows:Appointment[]; query:string; setQuery:(s:string)=>void; updateStatus:(id:number,s:Status)=>void; onNew:()=>void }) {
-  return <><section className="page-heading"><div><p>GESTÃO</p><h1>{title}</h1><h2>Organize e acompanhe todas as informações em um só lugar.</h2></div><button className="primary" onClick={onNew}><Plus size={18}/> Novo agendamento</button></section>
-  <section className="panel management"><div className="filters"><label><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Pesquisar por cliente, serviço ou profissional"/></label><button className="select">Todos os status <ChevronDown size={15}/></button><button className="select">Todos os profissionais <ChevronDown size={15}/></button><button className="outline"><Download size={17}/> Exportar CSV</button></div>
-  <AppointmentsPanel rows={rows} updateStatus={updateStatus} notify={()=>{}} onAll={()=>{}} /></section></>;
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="field"><span>{label}</span><div>{children}</div></label>; }
+function Logo() { return <div className="logo"><span><CalendarDays size={23} /></span><strong>Agenda<b>Pro</b></strong></div>; }
+function Loading() { return <div className="loading"><span><LoaderCircle className="spin" size={28} /></span><strong>Carregando seu AgendaPro...</strong></div>; }
+function Fatal({ message }: { message: string }) { return <div className="loading"><span><X size={28} /></span><strong>{message}</strong></div>; }
+function Metric({ icon: Icon, label, value, accent }: { icon: typeof CalendarDays; label: string; value: string; accent: string }) { return <article className="metric"><span className={`metric-icon ${accent}`}><Icon size={21} /></span><div><small>{label}</small><strong>{value}</strong></div></article>; }
+function Panel({ title, action, onAction, children }: { title: string; action: string; onAction: () => void; children: React.ReactNode }) { return <section className="panel"><div className="panel-head"><h2>{title}</h2><button onClick={onAction}>{action}<ChevronRight size={15} /></button></div>{children}</section>; }
+function Empty({ text }: { text: string }) { return <div className="empty"><CalendarDays size={29} /><strong>{text}</strong><small>Cadastre o primeiro item para começar.</small></div>; }
+function AppointmentList({ items }: { items: Appointment[] }) {
+  if (!items.length) return <Empty text="Nenhum agendamento ainda" />;
+  return <div className="list">{items.map(item => <div className="list-row" key={item.id}><span className="list-avatar calendar"><CalendarDays size={18} /></span><div><strong>{item.client_name}</strong><small>{item.service} · {item.professional}</small></div><div className="list-side"><strong>{formatDate(item.starts_at)}</strong><small className={`pill ${item.status.toLowerCase().replaceAll(" ", "-")}`}>{item.status}</small></div></div>)}</div>;
+}
+function ClientList({ items }: { items: Client[] }) {
+  if (!items.length) return <Empty text="Nenhum cliente cadastrado" />;
+  return <div className="list">{items.map(item => <div className="list-row" key={item.id}><span className="list-avatar">{item.name.slice(0, 2).toUpperCase()}</span><div><strong>{item.name}</strong><small>{item.email || item.phone || "Sem contato informado"}</small></div><div className="list-side"><small>{formatDate(item.created_at)}</small></div></div>)}</div>;
+}
+function PageTitle({ eyebrow, title, description, button, onClick }: { eyebrow: string; title: string; description: string; button: string; onClick: () => void }) { return <div className="heading"><div><small>{eyebrow}</small><h1>{title}</h1><p>{description}</p></div><button className="primary" onClick={onClick}><Plus size={18} />{button}</button></div>; }
+function ClientsPage({ clients, onNew }: { clients: Client[]; onNew: () => void }) {
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(() => clients.filter(item => `${item.name} ${item.email} ${item.phone}`.toLowerCase().includes(query.toLowerCase())), [clients, query]);
+  return <><PageTitle eyebrow="RELACIONAMENTO" title="Clientes" description={`${clients.length} cliente${clients.length === 1 ? "" : "s"} na sua base`} button="Novo cliente" onClick={onNew} /><section className="panel table-panel"><div className="table-search"><Search size={17} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar por nome, e-mail ou telefone" /></div>{filtered.length ? <table><thead><tr><th>CLIENTE</th><th>CONTATO</th><th>CADASTRO</th></tr></thead><tbody>{filtered.map(item => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{item.email || "—"}<small>{item.phone || ""}</small></td><td>{formatDate(item.created_at)}</td></tr>)}</tbody></table> : <Empty text="Nenhum cliente encontrado" />}</section></>;
+}
+function AppointmentsPage({ appointments, onNew }: { appointments: Appointment[]; onNew: () => void }) {
+  return <><PageTitle eyebrow="OPERAÇÃO" title="Agendamentos" description={`${appointments.length} atendimento${appointments.length === 1 ? "" : "s"} registrado${appointments.length === 1 ? "" : "s"}`} button="Novo agendamento" onClick={onNew} /><section className="panel">{appointments.length ? <div className="appointment-grid">{appointments.map(item => <article key={item.id}><div className="date-badge"><strong>{new Date(item.starts_at).getDate()}</strong><small>{new Date(item.starts_at).toLocaleDateString("pt-BR", { month: "short" })}</small></div><div><h3>{item.client_name}</h3><p>{item.service} com {item.professional}</p><small>{formatDate(item.starts_at)} · {item.duration_minutes} min</small></div><span className={`pill ${item.status.toLowerCase().replaceAll(" ", "-")}`}>{item.status}</span></article>)}</div> : <Empty text="Nenhum agendamento registrado" />}</section></>;
+}
+function MasterDashboard({ organizations, clients, profiles }: { organizations: Organization[]; clients: Client[]; profiles: Profile[] }) {
+  return <><div className="heading master-heading"><div><small>ADMINISTRAÇÃO DA PLATAFORMA</small><h1>Painel mestre</h1><p>Visão consolidada de todas as empresas cadastradas.</p></div><span><ShieldCheck size={18} /> Acesso exclusivo</span></div><section className="metrics master-metrics"><Metric icon={Building2} label="Empresas clientes" value={String(organizations.length)} accent="blue" /><Metric icon={UserRound} label="Usuários cadastrados" value={String(profiles.length)} accent="purple" /><Metric icon={UsersRound} label="Clientes das empresas" value={String(clients.length)} accent="green" /><Metric icon={BarChart3} label="Média por empresa" value={organizations.length ? (clients.length / organizations.length).toFixed(1) : "0"} accent="amber" /></section><section className="panel table-panel"><div className="panel-head"><h2>Clientes da plataforma</h2><small>Atualizado em tempo real</small></div>{organizations.length ? <table><thead><tr><th>EMPRESA</th><th>USUÁRIOS</th><th>CLIENTES CADASTRADOS</th><th>CRIADA EM</th></tr></thead><tbody>{organizations.map(org => <tr key={org.id}><td><strong>{org.name}</strong><small>{org.slug}</small></td><td>{profiles.filter(item => item.organization_id === org.id).length}</td><td><b className="count">{clients.filter(item => item.organization_id === org.id).length}</b></td><td>{formatDate(org.created_at)}</td></tr>)}</tbody></table> : <Empty text="Nenhuma empresa cadastrada" />}</section></>;
 }
 
-function AgendaView({ appointments, onNew }: { appointments:Appointment[]; onNew:()=>void }) {
-  const days = ["Seg 27","Ter 28","Qua 29","Qui 30","Sex 31","Sáb 01"];
-  return <><section className="page-heading"><div><p>AGENDA</p><h1>Calendário de atendimentos</h1><h2>Visualize a disponibilidade da equipe em tempo real.</h2></div><button className="primary" onClick={onNew}><Plus size={18}/> Novo agendamento</button></section>
-  <section className="panel calendar"><div className="calendar-tools"><div><button><ChevronLeft/></button><button className="today">Hoje</button><button><ChevronRight/></button><h3>27 de julho – 01 de agosto</h3></div><div><button className="active">Semana</button><button>Dia</button><button>Mês</button><button>Lista</button></div></div>
-    <div className="calendar-grid"><div className="corner"/>{days.map(d=><div className={d.includes("30")?"day active": "day"} key={d}>{d}</div>)}{["08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00"].map((time,i)=><div className="calendar-row" key={time}><div className="hour">{time}</div>{days.map((d,j)=><button key={d} className="slot" onClick={onNew}>{j===3 && appointments.find(a=>a.time.startsWith(String(8+i).padStart(2,"0"))) ? <span className="event">{appointments.find(a=>a.time.startsWith(String(8+i).padStart(2,"0")))?.client}<small>{appointments.find(a=>a.time.startsWith(String(8+i).padStart(2,"0")))?.service}</small></span>:null}</button>)}</div>)}</div>
-  </section></>;
+function ClientModal({ organizationId, token, onClose, onCreated }: { organizationId: string; token: string; onClose: () => void; onCreated: (client: Client) => void }) {
+  const [form, setForm] = useState({ name: "", email: "", phone: "" }); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  async function submit(event: FormEvent) { event.preventDefault(); setBusy(true); setError(""); try { const rows = await supabaseFetch<Client[]>("/rest/v1/clients", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ ...form, organization_id: organizationId }) }, token); onCreated(rows[0]); } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível cadastrar."); setBusy(false); } }
+  return <Modal title="Novo cliente" subtitle="Adicione uma pessoa à base da sua empresa." onClose={onClose}><form onSubmit={submit}><div className="modal-fields"><label className="wide">Nome completo<input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label><label>E-mail<input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label><label>Telefone / WhatsApp<input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></label></div>{error && <div className="message error">{error}</div>}<ModalActions busy={busy} onClose={onClose} label="Salvar cliente" /></form></Modal>;
 }
-
-function Reports() {
-  return <><section className="page-heading"><div><p>ANÁLISES</p><h1>Relatórios</h1><h2>Indicadores para tomar decisões melhores.</h2></div><button className="outline"><Download size={17}/> Exportar relatório</button></section>
-  <section className="metrics"><Metric icon={CircleDollarSign} label="Receita prevista" value="R$ 28,4 mil" delta="+16,8%" color="#22b981"/><Metric icon={CheckCircle2} label="Receita recebida" value="R$ 24,9 mil" delta="+12,1%" color="#3478f6"/><Metric icon={UsersRound} label="Ticket médio" value="R$ 142,80" delta="+5,4%" color="#7757d9"/><Metric icon={TrendingDown} label="Taxa de cancelamento" value="4,2%" delta="-1,8%" color="#ef6464" down/></section>
-  <section className="chart-grid"><article className="panel report-card"><h3>Serviços mais procurados</h3>{[["Coloração premium",88],["Corte feminino",73],["Manicure + pedicure",61],["Escova",45]].map(([n,v])=><div className="bar-row" key={n}><span>{n}</span><div><i style={{width:`${v}%`}}/></div><b>{v}</b></div>)}</article><article className="panel report-card"><h3>Desempenho por profissional</h3>{[["Camila Alves",94],["Rafael Lima",82],["Julia Santos",76],["Paula Nunes",58]].map(([n,v])=><div className="bar-row" key={n}><span>{n}</span><div><i className="purple" style={{width:`${v}%`}}/></div><b>{v}</b></div>)}</article></section></>;
+function AppointmentModal({ organizationId, token, clients, onClose, onCreated }: { organizationId: string; token: string; clients: Client[]; onClose: () => void; onCreated: (item: Appointment) => void }) {
+  const [form, setForm] = useState({ client_id: "", client_name: "", service: "", professional: "", starts_at: "", duration_minutes: "60", value: "", status: "Pendente" }); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  function selectClient(id: string) { const client = clients.find(item => item.id === id); setForm({ ...form, client_id: id, client_name: client?.name || "" }); }
+  async function submit(event: FormEvent) { event.preventDefault(); setBusy(true); setError(""); try { const payload = { ...form, client_id: form.client_id || null, organization_id: organizationId, duration_minutes: Number(form.duration_minutes), value: Number(form.value || 0), starts_at: new Date(form.starts_at).toISOString() }; const rows = await supabaseFetch<Appointment[]>("/rest/v1/appointments", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(payload) }, token); onCreated(rows[0]); } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível agendar."); setBusy(false); } }
+  return <Modal title="Novo agendamento" subtitle="Registre um atendimento na agenda da empresa." onClose={onClose}><form onSubmit={submit}><div className="modal-fields"><label>Cliente<select required value={form.client_id} onChange={e => selectClient(e.target.value)}><option value="">Selecione</option>{clients.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Serviço<input required value={form.service} onChange={e => setForm({ ...form, service: e.target.value })} placeholder="Ex.: Corte e escova" /></label><label>Profissional<input required value={form.professional} onChange={e => setForm({ ...form, professional: e.target.value })} /></label><label>Data e horário<input type="datetime-local" required value={form.starts_at} onChange={e => setForm({ ...form, starts_at: e.target.value })} /></label><label>Duração<select value={form.duration_minutes} onChange={e => setForm({ ...form, duration_minutes: e.target.value })}><option value="30">30 minutos</option><option value="60">1 hora</option><option value="90">1h30</option></select></label><label>Valor (R$)<input type="number" min="0" step="0.01" value={form.value} onChange={e => setForm({ ...form, value: e.target.value })} /></label></div>{error && <div className="message error">{error}</div>}<ModalActions busy={busy} onClose={onClose} label="Criar agendamento" /></form></Modal>;
 }
+function Modal({ title, subtitle, onClose, children }: { title: string; subtitle: string; onClose: () => void; children: React.ReactNode }) { return <div className="modal-backdrop" onMouseDown={onClose}><section className="modal" onMouseDown={e => e.stopPropagation()}><div className="modal-head"><div><span><CalendarDays size={21} /></span><div><h2>{title}</h2><p>{subtitle}</p></div></div><button onClick={onClose}><X /></button></div>{children}</section></div>; }
+function ModalActions({ busy, onClose, label }: { busy: boolean; onClose: () => void; label: string }) { return <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancelar</button><button className="primary" disabled={busy}>{busy && <LoaderCircle className="spin" size={17} />}{busy ? "Salvando..." : label}</button></div>; }
