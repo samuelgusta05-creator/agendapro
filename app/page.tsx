@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity, BarChart3, Bell, CalendarDays, CheckCircle2, ChevronDown,
   ChevronLeft, ChevronRight, CircleDollarSign, Clock3, Download, Eye,
-  FileText, LayoutDashboard, Menu, MoreHorizontal, Plus, Search, Settings,
-  Sparkles, TrendingDown, TrendingUp, UserRound, UsersRound, Wrench, X,
+  EyeOff, FileText, LayoutDashboard, LockKeyhole, LogIn, LogOut, Menu,
+  MoreHorizontal, Plus, Search, Settings, ShieldCheck, Sparkles,
+  TrendingDown, TrendingUp, UserRound, UsersRound, Wrench, X,
 } from "lucide-react";
 import {
   Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
@@ -44,6 +45,12 @@ const nav = [
   ["Profissionais", UserRound], ["Relatórios", BarChart3], ["Configurações", Settings],
 ] as const;
 
+const accessAccounts = [
+  { email: "admin@agendapro.com", password: "AgendaPro2026", name: "Marina Costa", role: "Administradora" },
+  { email: "atendimento@agendapro.com", password: "Atendimento2026", name: "Paula Nunes", role: "Atendente" },
+  { email: "profissional@agendapro.com", password: "Profissional2026", name: "Camila Alves", role: "Profissional" },
+] as const;
+
 function StatusPill({ status }: { status: Status }) {
   return <span className={`status status-${status.toLowerCase().replace(" ", "-")}`}><i />{status}</span>;
 }
@@ -59,6 +66,13 @@ function Metric({ icon: Icon, label, value, delta, color, down = false }: {
 }
 
 export default function Home() {
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [currentUser, setCurrentUser] = useState({ name: "Marina Costa", role: "Administradora", email: "admin@agendapro.com" });
+  const [login, setLogin] = useState({ email: "", password: "", remember: true });
+  const [loginError, setLoginError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
   const [active, setActive] = useState("Dashboard");
   const [sidebar, setSidebar] = useState(false);
   const [appointments, setAppointments] = useState(initialAppointments);
@@ -66,6 +80,20 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState({ client: "", phone: "", service: "Corte feminino", professional: "Camila Alves", date: "2026-07-30", time: "17:00", duration: "60", value: "120", status: "Pendente" as Status });
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("agendapro-session");
+    if (saved) {
+      try {
+        const session = JSON.parse(saved);
+        setCurrentUser(session);
+        setAuthenticated(true);
+      } catch {
+        window.localStorage.removeItem("agendapro-session");
+      }
+    }
+    setAuthReady(true);
+  }, []);
 
   const filtered = useMemo(() => appointments.filter(a => `${a.client} ${a.service} ${a.professional}`.toLowerCase().includes(query.toLowerCase())), [appointments, query]);
 
@@ -89,6 +117,71 @@ export default function Home() {
 
   function go(page: string) { setActive(page); setSidebar(false); if (page === "Novo agendamento") setModal(true); }
 
+  function submitLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setLoginError("");
+    setLoggingIn(true);
+    const account = accessAccounts.find(
+      item => item.email.toLowerCase() === login.email.trim().toLowerCase() && item.password === login.password,
+    );
+    window.setTimeout(() => {
+      if (!account) {
+        setLoginError("E-mail ou senha inválidos. Confira os dados e tente novamente.");
+        setLoggingIn(false);
+        return;
+      }
+      const session = { name: account.name, role: account.role, email: account.email };
+      setCurrentUser(session);
+      setAuthenticated(true);
+      if (login.remember) window.localStorage.setItem("agendapro-session", JSON.stringify(session));
+      setLoggingIn(false);
+    }, 550);
+  }
+
+  function logout() {
+    window.localStorage.removeItem("agendapro-session");
+    setAuthenticated(false);
+    setLogin({ email: "", password: "", remember: true });
+    setActive("Dashboard");
+  }
+
+  if (!authReady) {
+    return <div className="auth-loading"><span><CalendarDays size={28} /></span><p>Carregando AgendaPro...</p></div>;
+  }
+
+  if (!authenticated) {
+    return <main className="login-page">
+      <section className="login-brand-panel">
+        <div className="login-brand"><span><CalendarDays size={27} /></span><strong>Agenda<b>Pro</b></strong></div>
+        <div className="login-message">
+          <span className="eyebrow"><ShieldCheck size={15} /> GESTÃO INTELIGENTE</span>
+          <h1>Sua agenda.<br />Seu negócio.<br /><em>Tudo sob controle.</em></h1>
+          <p>Organize atendimentos, acompanhe resultados e ofereça uma experiência impecável aos seus clientes.</p>
+        </div>
+        <div className="login-proof"><div className="proof-avatars"><i>MC</i><i>CA</i><i>RL</i></div><div><b>+2.500 profissionais</b><small>organizam suas agendas todos os dias</small></div></div>
+      </section>
+      <section className="login-form-panel">
+        <form className="login-card" onSubmit={submitLogin}>
+          <div className="mobile-login-brand"><span><CalendarDays size={22} /></span>Agenda<b>Pro</b></div>
+          <div className="login-icon"><LockKeyhole size={22} /></div>
+          <h2>Bem-vindo de volta</h2>
+          <p>Acesse sua conta para continuar.</p>
+          <label>E-mail profissional
+            <div className="login-field"><UserRound size={18} /><input type="email" required autoComplete="email" value={login.email} onChange={e => setLogin({...login, email:e.target.value})} placeholder="seu@email.com" /></div>
+          </label>
+          <label>Senha
+            <div className="login-field"><LockKeyhole size={18} /><input type={showPassword ? "text" : "password"} required autoComplete="current-password" value={login.password} onChange={e => setLogin({...login, password:e.target.value})} placeholder="Digite sua senha" /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
+          </label>
+          <div className="login-options"><label><input type="checkbox" checked={login.remember} onChange={e => setLogin({...login, remember:e.target.checked})} /> Lembrar de mim</label><button type="button" onClick={() => setLoginError("Entre em contato com o administrador da empresa para redefinir sua senha.")}>Esqueci minha senha</button></div>
+          {loginError && <div className="login-error" role="alert">{loginError}</div>}
+          <button className="login-submit" disabled={loggingIn}>{loggingIn ? <><span className="spinner" /> Entrando...</> : <><LogIn size={18} /> Entrar no AgendaPro</>}</button>
+          <div className="demo-access"><span>Acesso de demonstração</span><button type="button" onClick={() => setLogin({...login, email:"admin@agendapro.com", password:"AgendaPro2026"})}><b>Administrador</b><small>admin@agendapro.com · AgendaPro2026</small></button></div>
+          <small className="login-security"><ShieldCheck size={14} /> Ambiente protegido e acesso monitorado</small>
+        </form>
+      </section>
+    </main>;
+  }
+
   return <div className="app-shell">
     <aside className={`sidebar ${sidebar ? "open" : ""}`}>
       <button className="close-mobile" onClick={() => setSidebar(false)} aria-label="Fechar menu"><X /></button>
@@ -96,7 +189,7 @@ export default function Home() {
       <div className="company"><span className="avatar">BS</span><div><b>Beauty Studio</b><small>Unidade Jardins</small></div><ChevronDown size={15} /></div>
       <nav><small>MENU PRINCIPAL</small>{nav.map(([label, Icon]) => <button key={label} className={active === label ? "active" : ""} onClick={() => go(label)}><Icon size={19} />{label}{label === "Agendamentos" && <em>12</em>}</button>)}</nav>
       <div className="help"><Sparkles size={20} /><b>Precisa de ajuda?</b><small>Nossa equipe está online.</small><button onClick={() => notify("Conversa com o suporte iniciada.")}>Falar com suporte</button></div>
-      <div className="profile"><span className="avatar photo">MC</span><div><b>Marina Costa</b><small>Administradora</small></div><MoreHorizontal size={18} /></div>
+      <div className="profile"><span className="avatar photo">{currentUser.name.split(" ").map(n => n[0]).join("").slice(0,2)}</span><div><b>{currentUser.name}</b><small>{currentUser.role}</small></div><button className="logout-button" onClick={logout} title="Sair do sistema" aria-label="Sair do sistema"><LogOut size={18} /></button></div>
     </aside>
 
     <main className="main">
