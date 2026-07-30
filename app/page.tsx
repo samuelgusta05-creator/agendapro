@@ -11,6 +11,7 @@ import {
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const SESSION_KEY = "agendapro-auth";
+const HUBLA_CHECKOUT_URL = "https://pay.hub.la/Gg7nKJa9s4MozUavPXZr";
 
 type Session = { access_token: string; refresh_token: string; expires_at?: number; user: { id: string; email?: string } };
 type Profile = { id: string; organization_id: string; full_name: string; email: string; role: string; is_platform_admin: boolean };
@@ -154,9 +155,8 @@ function AuthScreen({ onSession }: { onSession: (session: Session) => void }) {
         const result = await supabaseFetch<Session>("/auth/v1/token?grant_type=password", { method: "POST", body: JSON.stringify({ email: form.email, password: form.password }) });
         onSession(result);
       } else {
-        const result = await supabaseFetch<Session>("/auth/v1/signup", { method: "POST", body: JSON.stringify({ email: form.email, password: form.password, data: { full_name: form.name, company_name: form.company } }) });
-        if (result.access_token) onSession(result);
-        else setSuccess("Cadastro realizado! Confira seu e-mail para confirmar a conta e depois faça o login.");
+        await supabaseFetch<Session>("/auth/v1/signup", { method: "POST", body: JSON.stringify({ email: form.email, password: form.password, data: { full_name: form.name, company_name: form.company } }) });
+        window.location.assign(HUBLA_CHECKOUT_URL);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Não foi possível continuar.";
@@ -176,13 +176,19 @@ function AuthScreen({ onSession }: { onSession: (session: Session) => void }) {
     <section className="auth-form-wrap"><form className="auth-card" onSubmit={submit}><div className="mobile-logo"><Logo /></div>
       <div className="auth-tabs"><button type="button" className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); setSuccess(""); }}>Entrar</button><button type="button" className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); setSuccess(""); }}>Cadastre-se</button></div>
       <div className="auth-title"><span><LockKeyhole size={21} /></span><h2>{mode === "login" ? "Bem-vindo de volta" : "Crie sua conta"}</h2><p>{mode === "login" ? "Acesse sua empresa para continuar." : "Comece agora com seu espaço exclusivo."}</p></div>
+      {mode === "signup" && <div className="signup-plan">
+        <div className="signup-plan-head"><span>PLANO ÚNICO</span><strong>AgendaPro Completo</strong></div>
+        <div className="signup-plan-price"><span>Adesão</span><strong>R$ 99,99</strong></div>
+        <div className="signup-plan-renewal"><CheckCircle2 size={15} /><span>Depois, <strong>R$ 29,99/mês</strong> a partir de 30 dias</span></div>
+        <ul><li><CheckCircle2 size={14} />Agenda e clientes ilimitados</li><li><CheckCircle2 size={14} />Painel completo da empresa</li><li><ShieldCheck size={14} />Pagamento seguro pela Hubla</li></ul>
+      </div>}
       {mode === "signup" && <><Field label="Seu nome"><UserRound size={18} /><input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Nome completo" /></Field><Field label="Nome da empresa"><Building2 size={18} /><input required value={form.company} onChange={e => setForm({ ...form, company: e.target.value })} placeholder="Ex.: Studio Bella" /></Field></>}
       <Field label="E-mail"><UserRound size={18} /><input type="email" required autoComplete="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="voce@empresa.com" /></Field>
       <Field label="Senha"><LockKeyhole size={18} /><input type={showPassword ? "text" : "password"} required minLength={8} autoComplete={mode === "login" ? "current-password" : "new-password"} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Mínimo de 8 caracteres" /><button type="button" onClick={() => setShowPassword(value => !value)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></Field>
       {mode === "login" && <button className="forgot" type="button" onClick={recover}>Esqueci minha senha</button>}
       {error && <div className="message error">{error}</div>}{success && <div className="message success">{success}</div>}
-      <button className="auth-submit" disabled={busy}>{busy ? <LoaderCircle className="spin" size={19} /> : mode === "login" ? <LockKeyhole size={18} /> : <UserPlus size={18} />}{busy ? "Aguarde..." : mode === "login" ? "Entrar no AgendaPro" : "Criar minha conta"}</button>
-      <p className="terms"><ShieldCheck size={14} /> Ao continuar, você concorda com os termos de uso e privacidade.</p>
+      <button className="auth-submit" disabled={busy}>{busy ? <LoaderCircle className="spin" size={19} /> : mode === "login" ? <LockKeyhole size={18} /> : <UserPlus size={18} />}{busy ? "Aguarde..." : mode === "login" ? "Entrar no AgendaPro" : "Criar conta e ir para pagamento"}</button>
+      <p className="terms"><ShieldCheck size={14} /> {mode === "login" ? "Seus dados estão protegidos." : "Ao continuar, você cria sua conta e segue para o pagamento seguro."}</p>
     </form></section>
   </main>;
 }
