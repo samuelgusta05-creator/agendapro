@@ -1,0 +1,12 @@
+.openai
+.wrangler
+build
+db
+dist
+drizzle
+examples
+tests
+vite.config.ts
+worker
+work
+outputs
